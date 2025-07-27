@@ -50,5 +50,9 @@ def serve(path):
             return "index.html not found", 404
 
 
+# ... (todo o resto do seu código permanece igual)
+
 if __name__ == '__main__':
+    # Esta parte agora só será executada se você rodar "python src/main.py"
+    # O Gunicorn não executará esta parte, ele importará a variável 'app'
     app.run(host='0.0.0.0', port=5000, debug=True)
