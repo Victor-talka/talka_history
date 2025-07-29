@@ -7,13 +7,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ChatHistoryViewer from '@/components/ChatHistoryViewer';
 import LoginForm from '@/components/LoginForm';
 import AdminPanel from '@/components/AdminPanel';
+import { toast } from './hooks/use-toast';
 
 const queryClient = new QueryClient();
 
+// A interface não precisa mais da senha no front-end
 interface User {
-  id: string;
+  id: number;
   username: string;
-  password: string;
   createdAt: string;
   status: 'active' | 'inactive';
 }
@@ -22,59 +23,63 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUser, setCurrentUser] = useState<string>('');
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
-    // Verificar se há sessão ativa
+    // Verificar se há sessão ativa no localStorage
     const savedAuth = localStorage.getItem('talkahistory_auth');
     if (savedAuth) {
       const authData = JSON.parse(savedAuth);
       setIsAuthenticated(true);
       setIsAdmin(authData.isAdmin);
       setCurrentUser(authData.username);
+      setCurrentUserId(authData.userId);
     }
   }, []);
 
-  const handleLogin = (username: string, password: string) => {
-    // Verificar se é acesso admin
-    if (username === 'admin' && password === 'admin123') {
-      setIsAuthenticated(true);
-      setIsAdmin(true);
-      setCurrentUser(username);
-      localStorage.setItem('talkahistory_auth', JSON.stringify({
-        username,
-        isAdmin: true,
-        timestamp: Date.now()
-      }));
-      return;
-    }
+  const handleLogin = async (username: string, password: string) => {
+    try {
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
 
-    // Verificar usuários regulares
-    const savedUsers = localStorage.getItem('talkahistory_users');
-    if (savedUsers) {
-      const users: User[] = JSON.parse(savedUsers);
-      const user = users.find(u => u.username === username && u.password === password && u.status === 'active');
-      
-      if (user) {
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Credenciais inválidas');
+        }
+
+        const userData = await response.json();
+        
         setIsAuthenticated(true);
-        setIsAdmin(false);
-        setCurrentUser(username);
-        localStorage.setItem('talkahistory_auth', JSON.stringify({
-          username,
-          isAdmin: false,
-          timestamp: Date.now()
-        }));
-        return;
-      }
-    }
+        setIsAdmin(userData.isAdmin);
+        setCurrentUser(userData.username);
+        setCurrentUserId(userData.id);
 
-    // Login inválido
-    throw new Error('Credenciais inválidas');
+        localStorage.setItem('talkahistory_auth', JSON.stringify({
+            username: userData.username,
+            userId: userData.id,
+            isAdmin: userData.isAdmin,
+            timestamp: Date.now()
+        }));
+
+    } catch (error: any) {
+        toast({
+            title: "Erro de autenticação",
+            description: error.message,
+            variant: "destructive"
+        });
+        // Lança o erro para que o LoginForm possa tratar o estado de loading
+        throw error;
+    }
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setIsAdmin(false);
     setCurrentUser('');
+    setCurrentUserId(null);
     localStorage.removeItem('talkahistory_auth');
   };
 
@@ -114,8 +119,12 @@ function App() {
               <Route 
                 path="/" 
                 element={
-                  isAuthenticated && !isAdmin ? (
-                    <ChatHistoryViewer onLogout={handleLogout} currentUser={currentUser} />
+                  isAuthenticated && !isAdmin && currentUserId ? (
+                    <ChatHistoryViewer 
+                      onLogout={handleLogout} 
+                      currentUser={currentUser}
+                      currentUserId={currentUserId} // Prop adicionada aqui
+                    />
                   ) : (
                     <Navigate to="/login" replace />
                   )
@@ -133,4 +142,3 @@ function App() {
 }
 
 export default App;
-

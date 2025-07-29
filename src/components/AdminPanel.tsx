@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,14 +6,14 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Users, Plus, Trash2, Eye, EyeOff, LogOut } from 'lucide-react';
+import { Users, Plus, Trash2, LogOut } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
+// A interface agora reflete os dados do banco, sem a senha
 interface User {
-  id: string;
+  id: number; // O banco de dados gera um ID numérico
   username: string;
-  password: string;
-  createdAt: string;
+  created_at: string;
   status: 'active' | 'inactive';
 }
 
@@ -25,34 +25,35 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
   const [users, setUsers] = useState<User[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', password: '' });
-  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
 
-  // Carregar usuários do localStorage
-  useEffect(() => {
-    const savedUsers = localStorage.getItem('talkahistory_users');
-    if (savedUsers) {
-      setUsers(JSON.parse(savedUsers));
-    } else {
-      // Criar usuário padrão se não existir
-      const defaultUsers: User[] = [
-        {
-          id: '1',
-          username: 'admin',
-          password: 'admin123',
-          createdAt: new Date().toISOString(),
-          status: 'active'
-        }
-      ];
-      setUsers(defaultUsers);
-      localStorage.setItem('talkahistory_users', JSON.stringify(defaultUsers));
+  // Função para buscar usuários da API
+  const fetchUsers = useCallback(async () => {
+    setIsFetching(true);
+    try {
+      const response = await fetch('/api/users');
+      if (!response.ok) {
+        throw new Error('Falha ao buscar usuários');
+      }
+      const data = await response.json();
+      setUsers(data);
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os usuários do sistema.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsFetching(false);
     }
   }, []);
 
-  const saveUsers = (updatedUsers: User[]) => {
-    setUsers(updatedUsers);
-    localStorage.setItem('talkahistory_users', JSON.stringify(updatedUsers));
-  };
+  // Carregar usuários do banco de dados ao montar o componente
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,41 +67,33 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
       return;
     }
 
-    // Verificar se o usuário já existe
-    if (users.some(user => user.username === newUser.username)) {
-      toast({
-        title: "Erro",
-        description: "Este nome de usuário já existe.",
-        variant: "destructive"
-      });
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      const user: User = {
-        id: Date.now().toString(),
-        username: newUser.username,
-        password: newUser.password,
-        createdAt: new Date().toISOString(),
-        status: 'active'
-      };
+      const response = await fetch('/api/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
 
-      const updatedUsers = [...users, user];
-      saveUsers(updatedUsers);
-      
-      setNewUser({ username: '', password: '' });
-      setIsCreateDialogOpen(false);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro desconhecido ao criar usuário.');
+      }
       
       toast({
         title: "Sucesso",
         description: "Usuário criado com sucesso!",
       });
+      
+      setNewUser({ username: '', password: '' });
+      setIsCreateDialogOpen(false);
+      fetchUsers(); // Atualiza a lista de usuários
+      
     } catch (error) {
       toast({
         title: "Erro",
-        description: "Erro ao criar usuário.",
+        description: error.message,
         variant: "destructive"
       });
     } finally {
@@ -108,21 +101,33 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
     }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    const updatedUsers = users.filter(user => user.id !== userId);
-    saveUsers(updatedUsers);
-    
-    toast({
-      title: "Sucesso",
-      description: "Usuário removido com sucesso!",
-    });
-  };
+  const handleDeleteUser = async (userId: number) => {
+    try {
+        const response = await fetch('/api/delete-user', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: userId })
+        });
 
-  const togglePasswordVisibility = (userId: string) => {
-    setShowPasswords(prev => ({
-      ...prev,
-      [userId]: !prev[userId]
-    }));
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erro ao deletar usuário.');
+        }
+
+        toast({
+            title: "Sucesso",
+            description: "Usuário removido com sucesso!",
+        });
+
+        fetchUsers(); // Atualiza a lista de usuários
+
+    } catch (error) {
+        toast({
+            title: "Erro",
+            description: error.message,
+            variant: "destructive"
+        });
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -161,7 +166,7 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Total de Usuários</p>
-                  <p className="text-3xl font-bold text-gray-900">{users.length}</p>
+                  <p className="text-3xl font-bold text-gray-900">{isFetching ? '...' : users.length}</p>
                 </div>
                 <Users className="w-8 h-8 text-blue-600" />
               </div>
@@ -174,7 +179,7 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
                 <div>
                   <p className="text-sm font-medium text-gray-600">Usuários Ativos</p>
                   <p className="text-3xl font-bold text-green-600">
-                    {users.filter(user => user.status === 'active').length}
+                    {isFetching ? '...' : users.filter(user => user.status === 'active').length}
                   </p>
                 </div>
                 <Badge variant="secondary" className="bg-green-100 text-green-800">
@@ -190,7 +195,7 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
                 <div>
                   <p className="text-sm font-medium text-gray-600">Último Usuário</p>
                   <p className="text-lg font-semibold text-gray-900">
-                    {users.length > 0 ? users[users.length - 1].username : 'Nenhum'}
+                    {isFetching ? '...' : (users.length > 0 ? users[users.length - 1].username : 'Nenhum')}
                   </p>
                 </div>
                 <Plus className="w-8 h-8 text-gray-400" />
@@ -263,56 +268,41 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuário</TableHead>
-                  <TableHead>Senha</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Criado em</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.username}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono">
-                          {showPasswords[user.id] ? user.password : '••••••••'}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => togglePasswordVisibility(user.id)}
+                {isFetching ? (
+                    <TableRow><TableCell colSpan={4} className="text-center">Carregando...</TableCell></TableRow>
+                ) : (
+                    users.map((user) => (
+                    <TableRow key={user.id}>
+                        <TableCell className="font-medium">{user.username}</TableCell>
+                        <TableCell>
+                        <Badge 
+                            variant={user.status === 'active' ? 'default' : 'secondary'}
+                            className={user.status === 'active' ? 'bg-green-100 text-green-800' : ''}
                         >
-                          {showPasswords[user.id] ? (
-                            <EyeOff className="w-4 h-4" />
-                          ) : (
-                            <Eye className="w-4 h-4" />
-                          )}
+                            {user.status === 'active' ? 'Ativo' : 'Inativo'}
+                        </Badge>
+                        </TableCell>
+                        <TableCell>{formatDate(user.created_at)}</TableCell>
+                        <TableCell>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            disabled={user.username === 'admin'} // Proteger usuário admin
+                        >
+                            <Trash2 className="w-4 h-4" />
                         </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant={user.status === 'active' ? 'default' : 'secondary'}
-                        className={user.status === 'active' ? 'bg-green-100 text-green-800' : ''}
-                      >
-                        {user.status === 'active' ? 'Ativo' : 'Inativo'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{formatDate(user.createdAt)}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        disabled={user.username === 'admin'} // Proteger usuário admin
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        </TableCell>
+                    </TableRow>
+                    ))
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -323,4 +313,3 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
 };
 
 export default AdminPanel;
-
